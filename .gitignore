@@ -1,4 +1,4 @@
-client_secret.json
+*.json
 *.pyc
 .ipynb*
 budget_viz_real.ipynb

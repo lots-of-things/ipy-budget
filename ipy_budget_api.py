@@ -10,8 +10,8 @@ from pandas import DataFrame, concat, to_datetime, to_numeric
 
 # If modifying these scopes, delete your previously saved credentials
 # at ~/.credentials/sheets.googleapis.com-python-quickstart.json
-SCOPES = 'https://www.googleapis.com/auth/spreadsheets.readonly'
-CLIENT_SECRET_FILE = 'client_secret.json'
+SCOPES = 'https://www.googleapis.com/auth/spreadsheets'
+CLIENT_SECRET_FILE = 'sheets_secret.json'
 APPLICATION_NAME = 'ipy-budget api'
 
 
@@ -24,18 +24,13 @@ def get_credentials():
     Returns:
         Credentials, the obtained credential.
     """
-    home_dir = os.path.expanduser('~')
-    credential_dir = os.path.join(home_dir, '.credentials')
-    if not os.path.exists(credential_dir):
-        os.makedirs(credential_dir)
-    credential_path = os.path.join(credential_dir,
-                                   'sheets.googleapis.com-ipy-budget-api.json')
+    credential_path = 'sheets.googleapis.com-ipy-budget-api.json'
 
     store = Storage(credential_path)
     credentials = store.get()
     if not credentials or credentials.invalid:
         flags = tools.argparser.parse_args(args=[])
-        flow = client.flow_from_clientsecrets(os.path.join(credential_dir,CLIENT_SECRET_FILE), SCOPES)
+        flow = client.flow_from_clientsecrets(CLIENT_SECRET_FILE, SCOPES)
         flow.user_agent = APPLICATION_NAME
         credentials = tools.run_flow(flow, store, flags)
         print('Storing credentials to ' + credential_path)
@@ -77,6 +72,28 @@ def download_sheet_data(spreadsheetId,rangeName):
     else:
         return values
 
+def update_sheet_data(spreadsheet_id,df=None):
+    credentials = get_credentials()
+    http = credentials.authorize(httplib2.Http())
+    discoveryUrl = ('https://sheets.googleapis.com/$discovery/rest?'
+                    'version=v4')
+    service = discovery.build('sheets', 'v4', http=http,
+                              discoveryServiceUrl=discoveryUrl)
+
+    range_name = 'Main!A1:C'+str(df.shape[0]+1)
+    body = {
+        "majorDimension": "ROWS",
+        "values": [
+            ["month", "category", "amount"],
+            ] + df.values.tolist(),
+    }
+    return service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=range_name,
+        body=body,
+        valueInputOption='USER_ENTERED'
+    ).execute()
+
 def get_budget_data_raw(spreadsheetId,rangeSuffix='A:G'):
     return {sheetName: download_sheet_data(spreadsheetId,sheetName+'!'+rangeSuffix) for sheetName in download_sheet_names(spreadsheetId)}
 
@@ -88,12 +105,16 @@ def get_budget_data(spreadsheetId):
     return budget_data
 
 
-if __name__ == '__main__':
-    print ('just a test')
-    sheetName = download_sheet_names('1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms')[0]
-    print('Sheet Name: '+sheetName)
-    sheetData = download_sheet_data('1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms',sheetName+'!A:G')
-    for row in sheetData:
-        # Print columns A and E, which correspond to indices 0 and 4.
-        print('%s, %s' % (row[0], row[4]))
+def update_summary_budget_data():
+    budget_data = get_budget_data('')
+    budget_data['month'] = budget_data['date'].dt.to_period('M')
+    budget_data = budget_data[budget_data['person']=='w']
+    res = budget_data.groupby(['month','category'])['amount'].sum().reset_index()
+    res['amount'] = (res['amount']/10).astype(int)*10
+    res['month']=res['month'].astype(str)
 
+    update_sheet_data('',res)
+
+
+if __name__ == '__main__':
+    update_summary_budget_data()
