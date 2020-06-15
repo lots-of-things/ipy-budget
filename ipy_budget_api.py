@@ -72,7 +72,7 @@ def download_sheet_data(spreadsheetId,rangeName):
     else:
         return values
 
-def update_sheet_data(spreadsheet_id,df=None):
+def update_sheet_data(spreadsheet_id,range_name,df=None):
     credentials = get_credentials()
     http = credentials.authorize(httplib2.Http())
     discoveryUrl = ('https://sheets.googleapis.com/$discovery/rest?'
@@ -80,11 +80,10 @@ def update_sheet_data(spreadsheet_id,df=None):
     service = discovery.build('sheets', 'v4', http=http,
                               discoveryServiceUrl=discoveryUrl)
 
-    range_name = 'Main!A1:C'+str(df.shape[0]+1)
     body = {
         "majorDimension": "ROWS",
         "values": [
-            ["month", "category", "amount"],
+            df.columns.tolist(),
             ] + df.values.tolist(),
     }
     return service.spreadsheets().values().update(
@@ -105,15 +104,34 @@ def get_budget_data(spreadsheetId):
     return budget_data
 
 
+quarter_month = {'Q1':'-01','Q2':'-04','Q3':'-07','Q4':'-10'}
 def update_summary_budget_data():
     budget_data = get_budget_data('')
-    budget_data['month'] = budget_data['date'].dt.to_period('M')
-    budget_data = budget_data[budget_data['person']=='w']
-    res = budget_data.groupby(['month','category'])['amount'].sum().reset_index()
-    res['amount'] = (res['amount']/10).astype(int)*10
-    res['month']=res['month'].astype(str)
+    budget_data['month'] = budget_data['date'].dt.to_period('Q')
+    # budget_data = budget_data[budget_data['person']=='w']
+    income = budget_data.loc[~budget_data['category'].isin(('invest','redis','wedding'))].copy()
+    income['income'] = 'expenses'
+    income.loc[income['category'].isin(('inc','tax')),'income']='income'
+    res = income.groupby(['month','income'])['amount'].sum().reset_index()
+    res['amount'] = (res['amount'].abs()/10).astype(int)*10
+    res['month']=res['month'].astype(str).apply(lambda x: x[:4]+quarter_month[x[4:]])
+    output = res.pivot(index='month', columns='income', values='amount').fillna(0).reset_index()
+    cols = list(set(output.columns.tolist())-set('month'))
+    order = output[cols].mean().sort_values(ascending=False).index.tolist()
+    range_name = 'Income!A:C'
 
-    update_sheet_data('',res)
+    update_sheet_data('',range_name,output[['month']+order])
+
+    expenses = budget_data[~budget_data['category'].isin(('inc','tax','invest','redis','wedding'))]
+    res = expenses.groupby(['month','category'])['amount'].sum().reset_index()
+    res['amount'] = (res['amount'].abs()/10).astype(int)*10
+    res['month']=res['month'].astype(str).apply(lambda x: x[:4]+quarter_month[x[4:]])
+    output = res.pivot(index='month', columns='category', values='amount').fillna(0).reset_index()
+    cols = list(set(output.columns.tolist())-set('month'))
+    order = output[cols].mean().sort_values(ascending=False).index.tolist()
+    range_name = 'Main!A:T'
+
+    update_sheet_data('',range_name,output[['month']+order])
 
 
 if __name__ == '__main__':
