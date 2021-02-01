@@ -120,11 +120,26 @@ def update_summary_budget_data():
     order = output[cols].mean().sort_values(ascending=False).index.tolist()
     range_name = 'Income!A:C'
 
-    update_sheet_data('',range_name,output[['month']+order])
+    update_sheet_data('',range_name,output)
+
+    split = budget_data.loc[(budget_data['person']=='w') & ~budget_data['category'].isin(('invest','wedding'))].copy()
+    split['income'] = 'expenses'
+    split.loc[split['category'].isin(('inc','tax')),'income']='income'
+    split_res = split.groupby(['month','income'])['amount'].sum().reset_index()
+    split_res['amount'] = (split_res['amount'].abs()/10).astype(int)*10
+    split_res['month']=split_res['month'].astype(str).apply(lambda x: x[:4]+quarter_month[x[4:]])
+    split_output = split_res.pivot(index='month', columns='income', values='amount').fillna(0).reset_index()
+    combo = output.merge(split_output,on='month')
+    combo['will_income']=combo['income_y'].cumsum()/combo['income_x'].cumsum()
+    combo['will_expenses']=combo['expenses_y'].cumsum()/combo['expenses_x'].cumsum()
+    cols = ['month', 'will_income', 'will_expenses']
+    range_name = 'Split!A:E'
+
+    update_sheet_data('',range_name,combo[cols])
 
     expenses = budget_data[~budget_data['category'].isin(('inc','tax','invest','redis','wedding'))]
     res = expenses.groupby(['month','category'])['amount'].sum().reset_index()
-    res['amount'] = (res['amount'].abs()/10).astype(int)*10
+    res['amount'] = (res['amount'].apply(lambda x: x if x < 0 else 0).abs()/10).astype(int)*10
     res['month']=res['month'].astype(str).apply(lambda x: x[:4]+quarter_month[x[4:]])
     output = res.pivot(index='month', columns='category', values='amount').fillna(0).reset_index()
     cols = list(set(output.columns.tolist())-set('month'))
@@ -132,6 +147,7 @@ def update_summary_budget_data():
     range_name = 'Main!A:T'
 
     update_sheet_data('',range_name,output[['month']+order])
+
 
 
 if __name__ == '__main__':
